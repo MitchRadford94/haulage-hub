@@ -1,4 +1,5 @@
-import { useMemo } from 'react';
+import { useEffect, useRef, useMemo } from 'react';
+import L from 'leaflet';
 import { useTMS } from '@/contexts/TMSContext';
 
 const sampleCoords: Record<string, [number, number]> = {
@@ -17,137 +18,129 @@ const sampleCoords: Record<string, [number, number]> = {
   default: [52.5, -1.5],
 };
 
-const mapBounds = {
-  minLat: 49.8,
-  maxLat: 58.8,
-  minLng: -6.8,
-  maxLng: 2.2,
-};
-
 function getCoords(address: string): [number, number] {
   const lower = address.toLowerCase();
   for (const [key, coords] of Object.entries(sampleCoords)) {
     if (lower.includes(key)) return coords;
   }
-
   const hash = address.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
   return [51.5 + (hash % 40 - 20) * 0.1, -1.5 + (hash % 30 - 15) * 0.1];
 }
 
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function toPoint([lat, lng]: [number, number]) {
-  const x = ((lng - mapBounds.minLng) / (mapBounds.maxLng - mapBounds.minLng)) * 100;
-  const y = (1 - (lat - mapBounds.minLat) / (mapBounds.maxLat - mapBounds.minLat)) * 100;
-
-  return {
-    x: clamp(x, 6, 94),
-    y: clamp(y, 8, 92),
-  };
-}
-
 export default function MapView() {
   const { jobs, selectedJobId, drivers, vehicles } = useTMS();
+  const mapRef = useRef<L.Map | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const layerGroupRef = useRef<L.LayerGroup | null>(null);
 
-  const selectedJob = jobs.find((job) => job.id === selectedJobId);
+  const selectedJob = jobs.find((j) => j.id === selectedJobId);
 
-  const allStops = useMemo(
-    () => jobs.flatMap((job) => job.stops.map((stop, index) => ({
-      jobId: job.id,
-      address: stop.address,
-      index,
-      point: toPoint(getCoords(stop.address)),
-    }))),
-    [jobs]
-  );
+  // Init map once
+  useEffect(() => {
+    if (!containerRef.current || mapRef.current) return;
 
-  const selectedRoute = useMemo(
-    () => selectedJob
-      ? selectedJob.stops.map((stop, index) => ({
-          address: stop.address,
-          index,
-          point: toPoint(getCoords(stop.address)),
-        }))
-      : [],
-    [selectedJob]
-  );
+    const map = L.map(containerRef.current, {
+      center: [54.0, -2.0],
+      zoom: 6,
+      zoomControl: false,
+    });
 
-  const routePath = selectedRoute.map(({ point }) => `${point.x},${point.y}`).join(' ');
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap',
+    }).addTo(map);
+
+    L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+    layerGroupRef.current = L.layerGroup().addTo(map);
+    mapRef.current = map;
+
+    // Fix tile rendering after container is sized
+    setTimeout(() => map.invalidateSize(), 200);
+
+    return () => {
+      map.remove();
+      mapRef.current = null;
+      layerGroupRef.current = null;
+    };
+  }, []);
+
+  // Sync markers & route
+  useEffect(() => {
+    const map = mapRef.current;
+    const lg = layerGroupRef.current;
+    if (!map || !lg) return;
+
+    lg.clearLayers();
+
+    const allCoords: [number, number][] = [];
+
+    jobs.forEach((job) => {
+      const isSelected = job.id === selectedJobId;
+      const stopCoords: [number, number][] = [];
+
+      job.stops.forEach((stop, i) => {
+        const coords = getCoords(stop.address);
+        allCoords.push(coords);
+        stopCoords.push(coords);
+
+        const marker = L.circleMarker(coords, {
+          radius: isSelected ? 7 : 5,
+          color: isSelected ? 'hsl(210, 100%, 56%)' : 'hsl(215, 20%, 55%)',
+          fillColor: isSelected ? 'hsl(210, 100%, 56%)' : 'hsl(215, 20%, 40%)',
+          fillOpacity: isSelected ? 0.9 : 0.6,
+          weight: isSelected ? 2 : 1,
+        });
+
+        marker.bindTooltip(`Stop ${i + 1}: ${stop.address}`, { direction: 'top', offset: [0, -8] });
+        lg.addLayer(marker);
+      });
+
+      if (isSelected && stopCoords.length > 1) {
+        const polyline = L.polyline(stopCoords, {
+          color: 'hsl(210, 100%, 56%)',
+          weight: 3,
+          opacity: 0.8,
+          dashArray: '8 6',
+        });
+        lg.addLayer(polyline);
+      }
+    });
+
+    // Fit bounds
+    if (selectedJob) {
+      const coords = selectedJob.stops.map((s) => getCoords(s.address));
+      if (coords.length > 0) {
+        map.fitBounds(L.latLngBounds(coords.map((c) => L.latLng(c[0], c[1]))), { padding: [50, 50], maxZoom: 10 });
+      }
+    } else if (allCoords.length > 0) {
+      map.fitBounds(L.latLngBounds(allCoords.map((c) => L.latLng(c[0], c[1]))), { padding: [50, 50], maxZoom: 8 });
+    }
+  }, [jobs, selectedJobId, selectedJob]);
 
   return (
-    <div className="relative h-full w-full overflow-hidden rounded bg-gradient-to-br from-card via-background to-muted">
-      <div className="absolute inset-0 opacity-40">
-        <div className="h-full w-full bg-[linear-gradient(to_right,hsl(var(--border))_1px,transparent_1px),linear-gradient(to_bottom,hsl(var(--border))_1px,transparent_1px)] bg-[size:3.5rem_3.5rem]" />
-      </div>
+    <div className="relative h-full w-full overflow-hidden rounded">
+      <div ref={containerRef} className="h-full w-full" />
 
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,hsl(var(--primary)/0.18),transparent_28%),radial-gradient(circle_at_80%_30%,hsl(var(--accent)/0.14),transparent_24%),radial-gradient(circle_at_50%_80%,hsl(var(--muted-foreground)/0.10),transparent_30%)]" />
-
-      <div className="absolute left-3 top-3 z-10 rounded border border-border bg-card/85 px-3 py-2 backdrop-blur">
+      <div className="pointer-events-none absolute left-3 top-3 z-[1000] rounded border border-border bg-card/85 px-3 py-2 backdrop-blur">
         <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Route Overview</div>
-        <div className="mt-1 text-xs text-foreground">{jobs.length} jobs · {allStops.length} mapped stops</div>
+        <div className="mt-1 text-xs text-foreground">
+          {jobs.length} jobs · {jobs.reduce((n, j) => n + j.stops.length, 0)} stops
+        </div>
       </div>
 
       {selectedJob && (
-        <div className="absolute right-3 top-3 z-10 rounded border border-border bg-card/85 px-3 py-2 backdrop-blur">
+        <div className="pointer-events-none absolute right-3 top-3 z-[1000] rounded border border-border bg-card/85 px-3 py-2 backdrop-blur">
           <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Selected Job</div>
           <div className="mt-1 text-xs font-medium text-foreground">
-            {drivers.find((driver) => driver.id === selectedJob.driverId)?.name} — {vehicles.find((vehicle) => vehicle.id === selectedJob.vehicleId)?.registration}
+            {drivers.find((d) => d.id === selectedJob.driverId)?.name} —{' '}
+            {vehicles.find((v) => v.id === selectedJob.vehicleId)?.registration}
           </div>
           <div className="text-[10px] text-muted-foreground">{selectedJob.stops.length} stops</div>
         </div>
       )}
 
-      <svg viewBox="0 0 100 100" className="absolute inset-0 h-full w-full" preserveAspectRatio="none" aria-hidden="true">
-        {selectedRoute.length > 1 && (
-          <>
-            <polyline
-              points={routePath}
-              fill="none"
-              stroke="hsl(var(--primary) / 0.25)"
-              strokeWidth="2.6"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-            <polyline
-              points={routePath}
-              fill="none"
-              stroke="hsl(var(--primary))"
-              strokeWidth="1.05"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeDasharray="2.5 1.8"
-            />
-          </>
-        )}
-      </svg>
-
-      <div className="absolute inset-0">
-        {allStops.map((stop) => {
-          const isSelected = stop.jobId === selectedJobId;
-          return (
-            <div
-              key={`${stop.jobId}-${stop.index}`}
-              className="absolute -translate-x-1/2 -translate-y-1/2"
-              style={{ left: `${stop.point.x}%`, top: `${stop.point.y}%` }}
-              title={stop.address}
-            >
-              <div className={`flex h-4 w-4 items-center justify-center rounded-full border ${isSelected ? 'border-primary bg-primary shadow-[0_0_18px_hsl(var(--primary)/0.45)]' : 'border-border bg-card'}`}>
-                <div className={`h-1.5 w-1.5 rounded-full ${isSelected ? 'bg-primary-foreground' : 'bg-muted-foreground'}`} />
-              </div>
-              {isSelected && (
-                <div className="pointer-events-none absolute left-1/2 top-full mt-1 -translate-x-1/2 whitespace-nowrap rounded bg-card/90 px-1.5 py-0.5 text-[10px] text-foreground shadow-md">
-                  Stop {stop.index + 1}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
       {jobs.length === 0 && (
-        <div className="absolute inset-0 flex items-center justify-center">
+        <div className="absolute inset-0 z-[1000] flex items-center justify-center">
           <div className="rounded border border-dashed border-border bg-card/70 px-4 py-3 text-center backdrop-blur">
             <div className="text-xs font-medium text-foreground">No routes yet</div>
             <div className="mt-1 text-[11px] text-muted-foreground">Create a job to see route coverage here.</div>

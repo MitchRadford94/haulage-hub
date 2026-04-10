@@ -6,7 +6,7 @@ import { Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function JobCreationPanel() {
-  const { drivers, vehicles, addJob } = useTMS();
+  const { drivers, vehicles, addJob, setSelectedJobId } = useTMS();
   const [driverId, setDriverId] = useState('');
   const [vehicleId, setVehicleId] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
@@ -43,6 +43,7 @@ export default function JobCreationPanel() {
     };
 
     addJob(job);
+    setSelectedJobId(job.id);
     toast.success('Job created');
     setDriverId('');
     setVehicleId('');

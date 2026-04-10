@@ -70,6 +70,8 @@ export default function MapView() {
   const layerGroupRef = useRef<L.LayerGroup | null>(null);
 
   const selectedJob = jobs.find((j) => j.id === selectedJobId);
+  // Default to newest job if none selected
+  const activeJob = selectedJob ?? (jobs.length > 0 ? jobs[jobs.length - 1] : null);
 
   // Init map once
   useEffect(() => {
@@ -111,7 +113,7 @@ export default function MapView() {
     let cancelled = false;
 
     jobs.forEach((job) => {
-      const isSelected = job.id === selectedJobId;
+      const isActive = activeJob && job.id === activeJob.id;
       const stopCoords: [number, number][] = [];
 
       job.stops.forEach((stop, i) => {
@@ -119,13 +121,13 @@ export default function MapView() {
         allCoords.push(coords);
         stopCoords.push(coords);
 
-        const marker = L.marker(coords, { icon: createStopIcon(i, isSelected) });
+        const marker = L.marker(coords, { icon: createStopIcon(i, !!isActive) });
         marker.bindTooltip(`Stop ${i + 1}: ${stop.address}`, { direction: 'top', offset: [0, -14] });
         lg.addLayer(marker);
       });
 
-      // For unselected jobs with multiple stops, draw a thin dashed line
-      if (!isSelected && stopCoords.length > 1) {
+      // For non-active jobs with multiple stops, draw a thin dashed line
+      if (!isActive && stopCoords.length > 1) {
         lg.addLayer(
           L.polyline(stopCoords, {
             color: '#64748b',
@@ -137,29 +139,32 @@ export default function MapView() {
       }
     });
 
-    // For selected job, fetch real road route
-    if (selectedJob) {
-      const stopCoords = selectedJob.stops.map((s) => getCoords(s.address));
+    // For active job, fetch real road route
+    if (activeJob) {
+      const stopCoords = activeJob.stops.map((s) => getCoords(s.address));
       if (stopCoords.length > 1) {
         // Draw straight fallback immediately
         const fallback = L.polyline(stopCoords, {
           color: '#3b82f6',
           weight: 3,
-          opacity: 0.5,
+          opacity: 0.6,
           dashArray: '8 6',
         });
         lg.addLayer(fallback);
 
         fetchRoute(stopCoords).then((roadCoords) => {
-          if (cancelled || !roadCoords) return;
-          lg.removeLayer(fallback);
-          lg.addLayer(
-            L.polyline(roadCoords, {
-              color: '#3b82f6',
-              weight: 4,
-              opacity: 0.85,
-            })
-          );
+          if (cancelled) return;
+          if (roadCoords) {
+            lg.removeLayer(fallback);
+            lg.addLayer(
+              L.polyline(roadCoords, {
+                color: '#3b82f6',
+                weight: 5,
+                opacity: 0.9,
+              })
+            );
+          }
+          // If no roadCoords, keep the fallback visible
         });
       }
 
@@ -171,7 +176,7 @@ export default function MapView() {
     }
 
     return () => { cancelled = true; };
-  }, [jobs, selectedJobId, selectedJob]);
+  }, [jobs, selectedJobId, activeJob]);
 
   return (
     <div className="relative h-full w-full overflow-hidden rounded">
@@ -184,14 +189,14 @@ export default function MapView() {
         </div>
       </div>
 
-      {selectedJob && (
+      {activeJob && (
         <div className="pointer-events-none absolute right-3 top-3 z-[1000] rounded border border-border bg-card/85 px-3 py-2 backdrop-blur">
-          <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Selected Job</div>
+          <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Active Job</div>
           <div className="mt-1 text-xs font-medium text-foreground">
-            {drivers.find((d) => d.id === selectedJob.driverId)?.name} —{' '}
-            {vehicles.find((v) => v.id === selectedJob.vehicleId)?.registration}
+            {drivers.find((d) => d.id === activeJob.driverId)?.name} —{' '}
+            {vehicles.find((v) => v.id === activeJob.vehicleId)?.registration}
           </div>
-          <div className="text-[10px] text-muted-foreground">{selectedJob.stops.length} stops</div>
+          <div className="text-[10px] text-muted-foreground">{activeJob.stops.length} stops</div>
         </div>
       )}
 

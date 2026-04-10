@@ -1,18 +1,6 @@
-import { useEffect } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
+import { useMemo } from 'react';
 import { useTMS } from '@/contexts/TMSContext';
 
-// Fix default marker icons
-delete (L.Icon.Default.prototype as any)._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
-});
-
-// Sample UK coordinates for demo stops
 const sampleCoords: Record<string, [number, number]> = {
   london: [51.5074, -0.1278],
   manchester: [53.4808, -2.2426],
@@ -29,90 +17,141 @@ const sampleCoords: Record<string, [number, number]> = {
   default: [52.5, -1.5],
 };
 
+const mapBounds = {
+  minLat: 49.8,
+  maxLat: 58.8,
+  minLng: -6.8,
+  maxLng: 2.2,
+};
+
 function getCoords(address: string): [number, number] {
   const lower = address.toLowerCase();
   for (const [key, coords] of Object.entries(sampleCoords)) {
     if (lower.includes(key)) return coords;
   }
-  // Generate pseudo-random but stable coords for unknown addresses
+
   const hash = address.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
   return [51.5 + (hash % 40 - 20) * 0.1, -1.5 + (hash % 30 - 15) * 0.1];
 }
 
-function MapUpdater({ center }: { center: [number, number] }) {
-  const map = useMap();
-  useEffect(() => {
-    map.setView(center, map.getZoom(), { animate: true });
-  }, [center, map]);
-  return null;
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
 }
 
-const selectedIcon = new L.Icon({
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  className: 'selected-marker',
-});
+function toPoint([lat, lng]: [number, number]) {
+  const x = ((lng - mapBounds.minLng) / (mapBounds.maxLng - mapBounds.minLng)) * 100;
+  const y = (1 - (lat - mapBounds.minLat) / (mapBounds.maxLat - mapBounds.minLat)) * 100;
+
+  return {
+    x: clamp(x, 6, 94),
+    y: clamp(y, 8, 92),
+  };
+}
 
 export default function MapView() {
   const { jobs, selectedJobId, drivers, vehicles } = useTMS();
 
-  const selectedJob = jobs.find(j => j.id === selectedJobId);
+  const selectedJob = jobs.find((job) => job.id === selectedJobId);
 
-  const allStopCoords: { coord: [number, number]; address: string; jobId: string }[] = [];
-  jobs.forEach(job => {
-    job.stops.forEach(stop => {
-      allStopCoords.push({
-        coord: getCoords(stop.address),
-        address: stop.address,
-        jobId: job.id,
-      });
-    });
-  });
+  const allStops = useMemo(
+    () => jobs.flatMap((job) => job.stops.map((stop, index) => ({
+      jobId: job.id,
+      address: stop.address,
+      index,
+      point: toPoint(getCoords(stop.address)),
+    }))),
+    [jobs]
+  );
 
-  const selectedCoords = selectedJob
-    ? selectedJob.stops.map(s => getCoords(s.address))
-    : [];
+  const selectedRoute = useMemo(
+    () => selectedJob
+      ? selectedJob.stops.map((stop, index) => ({
+          address: stop.address,
+          index,
+          point: toPoint(getCoords(stop.address)),
+        }))
+      : [],
+    [selectedJob]
+  );
 
-  const center: [number, number] = selectedCoords.length > 0
-    ? selectedCoords[0]
-    : [52.5, -1.5];
+  const routePath = selectedRoute.map(({ point }) => `${point.x},${point.y}`).join(' ');
 
   return (
-    <div className="h-full w-full relative">
-      <MapContainer center={center} zoom={7} className="h-full w-full rounded" scrollWheelZoom>
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        />
-        <MapUpdater center={center} />
+    <div className="relative h-full w-full overflow-hidden rounded bg-gradient-to-br from-card via-background to-muted">
+      <div className="absolute inset-0 opacity-40">
+        <div className="h-full w-full bg-[linear-gradient(to_right,hsl(var(--border))_1px,transparent_1px),linear-gradient(to_bottom,hsl(var(--border))_1px,transparent_1px)] bg-[size:3.5rem_3.5rem]" />
+      </div>
 
-        {allStopCoords.map((s, i) => (
-          <Marker
-            key={`${s.jobId}-${i}`}
-            position={s.coord}
-            icon={s.jobId === selectedJobId ? selectedIcon : new L.Icon.Default()}
-          >
-            <Popup>
-              <span className="text-xs">{s.address}</span>
-            </Popup>
-          </Marker>
-        ))}
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,hsl(var(--primary)/0.18),transparent_28%),radial-gradient(circle_at_80%_30%,hsl(var(--accent)/0.14),transparent_24%),radial-gradient(circle_at_50%_80%,hsl(var(--muted-foreground)/0.10),transparent_30%)]" />
 
-        {selectedCoords.length > 1 && (
-          <Polyline positions={selectedCoords} color="hsl(199, 89%, 48%)" weight={3} opacity={0.8} />
-        )}
-      </MapContainer>
+      <div className="absolute left-3 top-3 z-10 rounded border border-border bg-card/85 px-3 py-2 backdrop-blur">
+        <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Route Overview</div>
+        <div className="mt-1 text-xs text-foreground">{jobs.length} jobs · {allStops.length} mapped stops</div>
+      </div>
 
       {selectedJob && (
-        <div className="absolute top-2 right-2 bg-card/90 backdrop-blur border border-border rounded px-3 py-2 z-[1000]">
-          <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Selected Job</div>
-          <div className="text-xs font-medium">
-            {drivers.find(d => d.id === selectedJob.driverId)?.name} — {vehicles.find(v => v.id === selectedJob.vehicleId)?.registration}
+        <div className="absolute right-3 top-3 z-10 rounded border border-border bg-card/85 px-3 py-2 backdrop-blur">
+          <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Selected Job</div>
+          <div className="mt-1 text-xs font-medium text-foreground">
+            {drivers.find((driver) => driver.id === selectedJob.driverId)?.name} — {vehicles.find((vehicle) => vehicle.id === selectedJob.vehicleId)?.registration}
           </div>
           <div className="text-[10px] text-muted-foreground">{selectedJob.stops.length} stops</div>
+        </div>
+      )}
+
+      <svg viewBox="0 0 100 100" className="absolute inset-0 h-full w-full" preserveAspectRatio="none" aria-hidden="true">
+        {selectedRoute.length > 1 && (
+          <>
+            <polyline
+              points={routePath}
+              fill="none"
+              stroke="hsl(var(--primary) / 0.25)"
+              strokeWidth="2.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            <polyline
+              points={routePath}
+              fill="none"
+              stroke="hsl(var(--primary))"
+              strokeWidth="1.05"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeDasharray="2.5 1.8"
+            />
+          </>
+        )}
+      </svg>
+
+      <div className="absolute inset-0">
+        {allStops.map((stop) => {
+          const isSelected = stop.jobId === selectedJobId;
+          return (
+            <div
+              key={`${stop.jobId}-${stop.index}`}
+              className="absolute -translate-x-1/2 -translate-y-1/2"
+              style={{ left: `${stop.point.x}%`, top: `${stop.point.y}%` }}
+              title={stop.address}
+            >
+              <div className={`flex h-4 w-4 items-center justify-center rounded-full border ${isSelected ? 'border-primary bg-primary shadow-[0_0_18px_hsl(var(--primary)/0.45)]' : 'border-border bg-card'}`}>
+                <div className={`h-1.5 w-1.5 rounded-full ${isSelected ? 'bg-primary-foreground' : 'bg-muted-foreground'}`} />
+              </div>
+              {isSelected && (
+                <div className="pointer-events-none absolute left-1/2 top-full mt-1 -translate-x-1/2 whitespace-nowrap rounded bg-card/90 px-1.5 py-0.5 text-[10px] text-foreground shadow-md">
+                  Stop {stop.index + 1}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {jobs.length === 0 && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="rounded border border-dashed border-border bg-card/70 px-4 py-3 text-center backdrop-blur">
+            <div className="text-xs font-medium text-foreground">No routes yet</div>
+            <div className="mt-1 text-[11px] text-muted-foreground">Create a job to see route coverage here.</div>
+          </div>
         </div>
       )}
     </div>

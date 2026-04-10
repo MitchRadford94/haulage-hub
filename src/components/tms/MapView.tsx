@@ -189,14 +189,14 @@ export default function MapView() {
         </div>
       </div>
 
-      {selectedJob && (
+      {activeJob && (
         <div className="pointer-events-none absolute right-3 top-3 z-[1000] rounded border border-border bg-card/85 px-3 py-2 backdrop-blur">
-          <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Selected Job</div>
+          <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Active Job</div>
           <div className="mt-1 text-xs font-medium text-foreground">
-            {drivers.find((d) => d.id === selectedJob.driverId)?.name} —{' '}
-            {vehicles.find((v) => v.id === selectedJob.vehicleId)?.registration}
+            {drivers.find((d) => d.id === activeJob.driverId)?.name} —{' '}
+            {vehicles.find((v) => v.id === activeJob.vehicleId)?.registration}
           </div>
-          <div className="text-[10px] text-muted-foreground">{selectedJob.stops.length} stops</div>
+          <div className="text-[10px] text-muted-foreground">{activeJob.stops.length} stops</div>
         </div>
       )}
 

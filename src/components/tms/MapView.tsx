@@ -1,4 +1,4 @@
-import { useEffect, useRef, useMemo } from 'react';
+import { useEffect, useRef } from 'react';
 import L from 'leaflet';
 import { useTMS } from '@/contexts/TMSContext';
 
@@ -25,6 +25,42 @@ function getCoords(address: string): [number, number] {
   }
   const hash = address.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
   return [51.5 + (hash % 40 - 20) * 0.1, -1.5 + (hash % 30 - 15) * 0.1];
+}
+
+function createStopIcon(index: number, selected: boolean): L.DivIcon {
+  const size = selected ? 28 : 22;
+  const bg = selected ? '#3b82f6' : '#64748b';
+  return L.divIcon({
+    className: '',
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+    html: `<div style="
+      width:${size}px;height:${size}px;
+      background:${bg};color:#fff;
+      border-radius:50%;border:2px solid #fff;
+      display:flex;align-items:center;justify-content:center;
+      font-size:${selected ? 12 : 10}px;font-weight:700;
+      box-shadow:0 2px 6px rgba(0,0,0,0.4);
+      line-height:1;
+    ">${index + 1}</div>`,
+  });
+}
+
+async function fetchRoute(stops: [number, number][]): Promise<[number, number][] | null> {
+  if (stops.length < 2) return null;
+  const coords = stops.map(([lat, lng]) => `${lng},${lat}`).join(';');
+  try {
+    const res = await fetch(
+      `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`
+    );
+    const data = await res.json();
+    if (data.code === 'Ok' && data.routes?.[0]?.geometry?.coordinates) {
+      return data.routes[0].geometry.coordinates.map(([lng, lat]: [number, number]) => [lat, lng]);
+    }
+  } catch {
+    // fall back to straight line
+  }
+  return null;
 }
 
 export default function MapView() {
@@ -54,7 +90,6 @@ export default function MapView() {
     layerGroupRef.current = L.layerGroup().addTo(map);
     mapRef.current = map;
 
-    // Fix tile rendering after container is sized
     setTimeout(() => map.invalidateSize(), 200);
 
     return () => {
@@ -73,6 +108,7 @@ export default function MapView() {
     lg.clearLayers();
 
     const allCoords: [number, number][] = [];
+    let cancelled = false;
 
     jobs.forEach((job) => {
       const isSelected = job.id === selectedJobId;
@@ -83,38 +119,58 @@ export default function MapView() {
         allCoords.push(coords);
         stopCoords.push(coords);
 
-        const marker = L.circleMarker(coords, {
-          radius: isSelected ? 7 : 5,
-          color: isSelected ? 'hsl(210, 100%, 56%)' : 'hsl(215, 20%, 55%)',
-          fillColor: isSelected ? 'hsl(210, 100%, 56%)' : 'hsl(215, 20%, 40%)',
-          fillOpacity: isSelected ? 0.9 : 0.6,
-          weight: isSelected ? 2 : 1,
-        });
-
-        marker.bindTooltip(`Stop ${i + 1}: ${stop.address}`, { direction: 'top', offset: [0, -8] });
+        const marker = L.marker(coords, { icon: createStopIcon(i, isSelected) });
+        marker.bindTooltip(`Stop ${i + 1}: ${stop.address}`, { direction: 'top', offset: [0, -14] });
         lg.addLayer(marker);
       });
 
-      if (isSelected && stopCoords.length > 1) {
-        const polyline = L.polyline(stopCoords, {
-          color: 'hsl(210, 100%, 56%)',
-          weight: 3,
-          opacity: 0.8,
-          dashArray: '8 6',
-        });
-        lg.addLayer(polyline);
+      // For unselected jobs with multiple stops, draw a thin dashed line
+      if (!isSelected && stopCoords.length > 1) {
+        lg.addLayer(
+          L.polyline(stopCoords, {
+            color: '#64748b',
+            weight: 2,
+            opacity: 0.4,
+            dashArray: '6 4',
+          })
+        );
       }
     });
 
-    // Fit bounds
+    // For selected job, fetch real road route
     if (selectedJob) {
-      const coords = selectedJob.stops.map((s) => getCoords(s.address));
-      if (coords.length > 0) {
-        map.fitBounds(L.latLngBounds(coords.map((c) => L.latLng(c[0], c[1]))), { padding: [50, 50], maxZoom: 10 });
+      const stopCoords = selectedJob.stops.map((s) => getCoords(s.address));
+      if (stopCoords.length > 1) {
+        // Draw straight fallback immediately
+        const fallback = L.polyline(stopCoords, {
+          color: '#3b82f6',
+          weight: 3,
+          opacity: 0.5,
+          dashArray: '8 6',
+        });
+        lg.addLayer(fallback);
+
+        fetchRoute(stopCoords).then((roadCoords) => {
+          if (cancelled || !roadCoords) return;
+          lg.removeLayer(fallback);
+          lg.addLayer(
+            L.polyline(roadCoords, {
+              color: '#3b82f6',
+              weight: 4,
+              opacity: 0.85,
+            })
+          );
+        });
+      }
+
+      if (stopCoords.length > 0) {
+        map.fitBounds(L.latLngBounds(stopCoords.map((c) => L.latLng(c[0], c[1]))), { padding: [50, 50], maxZoom: 10 });
       }
     } else if (allCoords.length > 0) {
       map.fitBounds(L.latLngBounds(allCoords.map((c) => L.latLng(c[0], c[1]))), { padding: [50, 50], maxZoom: 8 });
     }
+
+    return () => { cancelled = true; };
   }, [jobs, selectedJobId, selectedJob]);
 
   return (

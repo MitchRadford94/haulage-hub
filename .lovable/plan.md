@@ -1,42 +1,39 @@
 
 
-## Problem
-The `getCoords` function only matches city names (london, manchester, etc.). Postcodes like "SW1A 1AA" don't match any key, so they fall through to a hash-based random position.
+## HGV-Friendly Routing
 
-## Solution
-Use the **OpenStreetMap Nominatim** geocoding API to resolve any address or postcode to real coordinates. It's free, no API key needed, and handles UK postcodes well.
+### Problem
+Currently using OSRM's demo server with `driving` profile — standard car routing that ignores truck restrictions like low bridges, weight limits, and width constraints.
+
+### Solution
+Switch from OSRM to **Valhalla** (open-source, free public instance at `valhalla1.openstreetmap.de`) using its `truck` costing model. This accounts for:
+- Vehicle height/weight/width restrictions
+- Low bridge avoidance
+- Road access restrictions for HGVs
 
 ### Changes: `src/components/tms/MapView.tsx`
 
-1. **Replace `getCoords` with an async `geocode` function** that:
-   - Calls `https://nominatim.openstreetmap.org/search?format=json&q={address}&countrycodes=gb&limit=1`
-   - Returns `[lat, lng]` from the response
-   - Falls back to the existing city-name lookup if the API fails
-   - Caches results in a `Map<string, [number, number]>` to avoid repeat requests
+Replace the `fetchRoute` function to call Valhalla instead of OSRM:
 
-2. **Make the marker/route sync `useEffect` async** to await geocoding before placing markers and fetching OSRM routes.
+- **Endpoint**: `https://valhalla1.openstreetmap.de/route`
+- **Costing**: `"truck"` with sensible UK HGV defaults (height: 4.11m, width: 2.6m, weight: 44t, length: 16.5m)
+- **Request format**: POST with JSON body containing locations and truck costing options
+- **Response parsing**: Extract the encoded polyline shape from Valhalla's response and decode it to lat/lng coordinates
+- **Fallback**: If Valhalla fails, fall back to OSRM car routing, then to straight lines
 
-3. **Add a small delay between geocode calls** (or batch them) to respect Nominatim's 1 req/sec rate limit.
-
-4. Keep the existing `sampleCoords` lookup as a fast offline fallback — check it first before hitting the API.
-
-### Technical shape
+### Technical Detail
 ```text
-geocodeCache: Map<string, [number,number]>
-
-async geocode(address):
-  if cache has address → return cached
-  if sampleCoords match → return & cache
-  fetch Nominatim → parse lat/lon → cache & return
-  on error → hash fallback
-
-useEffect (jobs/selectedJobId change):
-  resolve all stop coords via await Promise.all(geocode(...))
-  place markers + fetch OSRM route (unchanged)
+POST https://valhalla1.openstreetmap.de/route
+Body: {
+  "locations": [{"lat":..,"lon":..}, ...],
+  "costing": "truck",
+  "costing_options": {
+    "truck": { "height": 4.11, "width": 2.6, "weight": 44, "length": 16.5 }
+  },
+  "units": "km",
+  "shape_format": "polyline6"
+}
 ```
 
-### Result
-- Entering "SW1A 1AA" or "M1 1AA" will place markers at the correct real-world location.
-- City names still work instantly via the local lookup.
-- Routes between postcodes will follow real roads via OSRM.
+Decode the returned polyline shape into `[lat, lng][]` and render as before. No new dependencies needed — just a polyline decode function (~15 lines).
 

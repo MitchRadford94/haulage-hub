@@ -1,39 +1,45 @@
 
 
-## HGV-Friendly Routing
+## AI Route Planner
 
-### Problem
-Currently using OSRM's demo server with `driving` profile — standard car routing that ignores truck restrictions like low bridges, weight limits, and width constraints.
+### What it does
+A new "Route Planner" tab where dispatchers enter a list of addresses/postcodes and select which drivers are available. AI optimizes and assigns stops across drivers, minimizing total distance. It then creates the jobs automatically.
 
-### Solution
-Switch from OSRM to **Valhalla** (open-source, free public instance at `valhalla1.openstreetmap.de`) using its `truck` costing model. This accounts for:
-- Vehicle height/weight/width restrictions
-- Low bridge avoidance
-- Road access restrictions for HGVs
+### How it works
 
-### Changes: `src/components/tms/MapView.tsx`
+1. **New nav tab**: Add "Route Planner" with a brain/wand icon to the NavBar.
 
-Replace the `fetchRoute` function to call Valhalla instead of OSRM:
+2. **New component `src/components/tms/RoutePlanner.tsx`**:
+   - Left side: text area to paste/type all delivery addresses (one per line), multi-select for available drivers + vehicles, date picker
+   - "Optimize Routes" button
+   - Right side: shows AI-generated assignments per driver with ordered stop lists
+   - "Create All Jobs" button to batch-create the jobs
 
-- **Endpoint**: `https://valhalla1.openstreetmap.de/route`
-- **Costing**: `"truck"` with sensible UK HGV defaults (height: 4.11m, width: 2.6m, weight: 44t, length: 16.5m)
-- **Request format**: POST with JSON body containing locations and truck costing options
-- **Response parsing**: Extract the encoded polyline shape from Valhalla's response and decode it to lat/lng coordinates
-- **Fallback**: If Valhalla fails, fall back to OSRM car routing, then to straight lines
+3. **Edge function `supabase/functions/optimize-routes/index.ts`**:
+   - Receives: list of addresses, list of available drivers/vehicles, optional depot address
+   - Calls Lovable AI (Gemini) with a prompt like: "You are a logistics route optimizer. Given these delivery addresses and N available drivers starting from [depot], assign stops to drivers and order each driver's stops to minimize total driving distance. Return structured JSON."
+   - Uses tool-calling for structured output: `{ assignments: [{ driverIndex: number, stops: string[] }] }`
+   - Returns the optimized assignments
 
-### Technical Detail
-```text
-POST https://valhalla1.openstreetmap.de/route
-Body: {
-  "locations": [{"lat":..,"lon":..}, ...],
-  "costing": "truck",
-  "costing_options": {
-    "truck": { "height": 4.11, "width": 2.6, "weight": 44, "length": 16.5 }
-  },
-  "units": "km",
-  "shape_format": "polyline6"
-}
-```
+4. **Flow**:
+   - User pastes 20 addresses, selects 3 drivers + vehicles
+   - Clicks "Optimize" → calls edge function → AI returns grouped & ordered stops
+   - UI shows the plan per driver with a preview
+   - User clicks "Create Jobs" → creates one Job per driver with the AI-ordered stops
+   - Map auto-shows the routes
 
-Decode the returned polyline shape into `[lat, lng][]` and render as before. No new dependencies needed — just a polyline decode function (~15 lines).
+### Technical details
+
+- **Edge function** uses `LOVABLE_API_KEY` (already available) to call `https://ai.gateway.lovable.dev/v1/chat/completions`
+- Structured output via tool-calling ensures reliable JSON parsing
+- Model: `google/gemini-3-flash-preview` (fast, cheap)
+- Need to set up Lovable Cloud (supabase init) since no `supabase/` folder exists yet
+- Add the new tab to NavBar and Index.tsx
+- The RoutePlanner component uses the existing TMSContext to create jobs
+
+### Files to create/edit
+- `supabase/functions/optimize-routes/index.ts` — edge function
+- `src/components/tms/RoutePlanner.tsx` — new UI component
+- `src/components/tms/NavBar.tsx` — add tab
+- `src/pages/Index.tsx` — render RoutePlanner on new tab
 

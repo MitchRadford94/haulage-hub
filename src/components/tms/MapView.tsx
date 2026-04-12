@@ -78,10 +78,56 @@ function createStopIcon(index: number, selected: boolean): L.DivIcon {
   });
 }
 
+function decodePolyline6(encoded: string): [number, number][] {
+  const coords: [number, number][] = [];
+  let index = 0, lat = 0, lng = 0;
+  while (index < encoded.length) {
+    for (const isLng of [false, true]) {
+      let shift = 0, result = 0, byte: number;
+      do {
+        byte = encoded.charCodeAt(index++) - 63;
+        result |= (byte & 0x1f) << shift;
+        shift += 5;
+      } while (byte >= 0x20);
+      const delta = result & 1 ? ~(result >> 1) : result >> 1;
+      if (isLng) lng += delta; else lat += delta;
+    }
+    coords.push([lat / 1e6, lng / 1e6]);
+  }
+  return coords;
+}
+
 async function fetchRoute(stops: [number, number][]): Promise<[number, number][] | null> {
   if (stops.length < 2) return null;
-  const coords = stops.map(([lat, lng]) => `${lng},${lat}`).join(';');
+
+  // Try Valhalla truck routing first
   try {
+    const body = {
+      locations: stops.map(([lat, lon]) => ({ lat, lon })),
+      costing: 'truck',
+      costing_options: {
+        truck: { height: 4.11, width: 2.6, weight: 44, length: 16.5 },
+      },
+      units: 'km',
+      shape_format: 'polyline6',
+    };
+    const res = await fetch('https://valhalla1.openstreetmap.de/route', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const shape = data.trip?.legs?.map((l: { shape: string }) => l.shape).join('') ?? data.trip?.shape;
+      if (shape) return decodePolyline6(shape);
+    }
+  } catch {
+    // fall through to OSRM
+  }
+
+  // Fallback: OSRM car routing
+  try {
+    const coords = stops.map(([lat, lng]) => `${lng},${lat}`).join(';');
     const res = await fetch(
       `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`
     );
@@ -92,6 +138,7 @@ async function fetchRoute(stops: [number, number][]): Promise<[number, number][]
   } catch {
     // fall back to straight line
   }
+
   return null;
 }
 

@@ -18,13 +18,45 @@ const sampleCoords: Record<string, [number, number]> = {
   default: [52.5, -1.5],
 };
 
-function getCoords(address: string): [number, number] {
-  const lower = address.toLowerCase();
-  for (const [key, coords] of Object.entries(sampleCoords)) {
-    if (lower.includes(key)) return coords;
+const geocodeCache = new Map<string, [number, number]>();
+
+async function geocode(address: string): Promise<[number, number]> {
+  const key = address.trim().toLowerCase();
+
+  // Check cache
+  if (geocodeCache.has(key)) return geocodeCache.get(key)!;
+
+  // Check local city lookup
+  for (const [city, coords] of Object.entries(sampleCoords)) {
+    if (city !== 'default' && key.includes(city)) {
+      geocodeCache.set(key, coords);
+      return coords;
+    }
   }
+
+  // Call Nominatim
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&countrycodes=gb&limit=1`,
+      { headers: { 'User-Agent': 'LovableTMS/1.0' } }
+    );
+    if (res.ok) {
+      const data = await res.json();
+      if (data.length > 0) {
+        const coords: [number, number] = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+        geocodeCache.set(key, coords);
+        return coords;
+      }
+    }
+  } catch {
+    // fall through to hash fallback
+  }
+
+  // Hash fallback
   const hash = address.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
-  return [51.5 + (hash % 40 - 20) * 0.1, -1.5 + (hash % 30 - 15) * 0.1];
+  const fallback: [number, number] = [51.5 + (hash % 40 - 20) * 0.1, -1.5 + (hash % 30 - 15) * 0.1];
+  geocodeCache.set(key, fallback);
+  return fallback;
 }
 
 function createStopIcon(index: number, selected: boolean): L.DivIcon {

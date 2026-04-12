@@ -18,13 +18,45 @@ const sampleCoords: Record<string, [number, number]> = {
   default: [52.5, -1.5],
 };
 
-function getCoords(address: string): [number, number] {
-  const lower = address.toLowerCase();
-  for (const [key, coords] of Object.entries(sampleCoords)) {
-    if (lower.includes(key)) return coords;
+const geocodeCache = new Map<string, [number, number]>();
+
+async function geocode(address: string): Promise<[number, number]> {
+  const key = address.trim().toLowerCase();
+
+  // Check cache
+  if (geocodeCache.has(key)) return geocodeCache.get(key)!;
+
+  // Check local city lookup
+  for (const [city, coords] of Object.entries(sampleCoords)) {
+    if (city !== 'default' && key.includes(city)) {
+      geocodeCache.set(key, coords);
+      return coords;
+    }
   }
+
+  // Call Nominatim
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&countrycodes=gb&limit=1`,
+      { headers: { 'User-Agent': 'LovableTMS/1.0' } }
+    );
+    if (res.ok) {
+      const data = await res.json();
+      if (data.length > 0) {
+        const coords: [number, number] = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+        geocodeCache.set(key, coords);
+        return coords;
+      }
+    }
+  } catch {
+    // fall through to hash fallback
+  }
+
+  // Hash fallback
   const hash = address.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
-  return [51.5 + (hash % 40 - 20) * 0.1, -1.5 + (hash % 30 - 15) * 0.1];
+  const fallback: [number, number] = [51.5 + (hash % 40 - 20) * 0.1, -1.5 + (hash % 30 - 15) * 0.1];
+  geocodeCache.set(key, fallback);
+  return fallback;
 }
 
 function createStopIcon(index: number, selected: boolean): L.DivIcon {
@@ -107,54 +139,60 @@ export default function MapView() {
     const lg = layerGroupRef.current;
     if (!map || !lg) return;
 
-    lg.clearLayers();
-
-    const allCoords: [number, number][] = [];
     let cancelled = false;
 
-    jobs.forEach((job) => {
-      const isActive = activeJob && job.id === activeJob.id;
-      const stopCoords: [number, number][] = [];
+    (async () => {
+      lg.clearLayers();
+      const allCoords: [number, number][] = [];
 
-      job.stops.forEach((stop, i) => {
-        const coords = getCoords(stop.address);
-        allCoords.push(coords);
-        stopCoords.push(coords);
+      // Geocode all stops for all jobs
+      for (const job of jobs) {
+        const isActive = activeJob && job.id === activeJob.id;
+        const stopCoords: [number, number][] = [];
 
-        const marker = L.marker(coords, { icon: createStopIcon(i, !!isActive) });
-        marker.bindTooltip(`Stop ${i + 1}: ${stop.address}`, { direction: 'top', offset: [0, -14] });
-        lg.addLayer(marker);
-      });
+        const coords = await Promise.all(job.stops.map((s) => geocode(s.address)));
 
-      // For non-active jobs with multiple stops, draw a thin dashed line
-      if (!isActive && stopCoords.length > 1) {
-        lg.addLayer(
-          L.polyline(stopCoords, {
-            color: '#64748b',
-            weight: 2,
-            opacity: 0.4,
-            dashArray: '6 4',
-          })
-        );
-      }
-    });
-
-    // For active job, fetch real road route
-    if (activeJob) {
-      const stopCoords = activeJob.stops.map((s) => getCoords(s.address));
-      if (stopCoords.length > 1) {
-        // Draw straight fallback immediately
-        const fallback = L.polyline(stopCoords, {
-          color: '#3b82f6',
-          weight: 3,
-          opacity: 0.6,
-          dashArray: '8 6',
-        });
-        lg.addLayer(fallback);
-
-        fetchRoute(stopCoords).then((roadCoords) => {
+        coords.forEach((c, i) => {
           if (cancelled) return;
-          if (roadCoords) {
+          allCoords.push(c);
+          stopCoords.push(c);
+
+          const marker = L.marker(c, { icon: createStopIcon(i, !!isActive) });
+          marker.bindTooltip(`Stop ${i + 1}: ${job.stops[i].address}`, { direction: 'top', offset: [0, -14] });
+          lg.addLayer(marker);
+        });
+
+        if (cancelled) return;
+
+        // Non-active jobs: thin dashed line
+        if (!isActive && stopCoords.length > 1) {
+          lg.addLayer(
+            L.polyline(stopCoords, {
+              color: '#64748b',
+              weight: 2,
+              opacity: 0.4,
+              dashArray: '6 4',
+            })
+          );
+        }
+      }
+
+      if (cancelled) return;
+
+      // Active job: fetch real road route
+      if (activeJob) {
+        const stopCoords = await Promise.all(activeJob.stops.map((s) => geocode(s.address)));
+        if (stopCoords.length > 1) {
+          const fallback = L.polyline(stopCoords, {
+            color: '#3b82f6',
+            weight: 3,
+            opacity: 0.6,
+            dashArray: '8 6',
+          });
+          lg.addLayer(fallback);
+
+          const roadCoords = await fetchRoute(stopCoords);
+          if (!cancelled && roadCoords) {
             lg.removeLayer(fallback);
             lg.addLayer(
               L.polyline(roadCoords, {
@@ -164,16 +202,15 @@ export default function MapView() {
               })
             );
           }
-          // If no roadCoords, keep the fallback visible
-        });
-      }
+        }
 
-      if (stopCoords.length > 0) {
-        map.fitBounds(L.latLngBounds(stopCoords.map((c) => L.latLng(c[0], c[1]))), { padding: [50, 50], maxZoom: 10 });
+        if (stopCoords.length > 0) {
+          map.fitBounds(L.latLngBounds(stopCoords.map((c) => L.latLng(c[0], c[1]))), { padding: [50, 50], maxZoom: 10 });
+        }
+      } else if (allCoords.length > 0) {
+        map.fitBounds(L.latLngBounds(allCoords.map((c) => L.latLng(c[0], c[1]))), { padding: [50, 50], maxZoom: 8 });
       }
-    } else if (allCoords.length > 0) {
-      map.fitBounds(L.latLngBounds(allCoords.map((c) => L.latLng(c[0], c[1]))), { padding: [50, 50], maxZoom: 8 });
-    }
+    })();
 
     return () => { cancelled = true; };
   }, [jobs, selectedJobId, activeJob]);

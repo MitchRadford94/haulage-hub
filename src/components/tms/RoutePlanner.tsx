@@ -123,8 +123,9 @@ export default function RoutePlanner() {
             value={addresses}
             onChange={e => setAddresses(e.target.value)}
             placeholder={"SW1A 1AA\nM1 1AA\nB1 1BB\n..."}
-            className="min-h-[160px] text-xs bg-secondary border-border font-mono"
+            className={`min-h-[160px] text-xs bg-secondary font-mono ${errors.addresses ? 'border-red-500' : 'border-border'}`}
           />
+          {errors.addresses && <p className="text-[10px] text-red-500 mt-1">{errors.addresses}</p>}
         </div>
 
         <div>
@@ -174,6 +175,7 @@ export default function RoutePlanner() {
               </button>
             ))}
           </div>
+          {errors.drivers && <p className="text-[10px] text-red-500 mt-1">{errors.drivers}</p>}
         </div>
 
         <Button

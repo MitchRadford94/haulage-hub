@@ -1,4 +1,4 @@
-import { Truck, LayoutDashboard, ClipboardList, ShieldCheck } from 'lucide-react';
+import { Truck, LayoutDashboard, ClipboardList, ShieldCheck, Brain } from 'lucide-react';
 
 interface NavBarProps {
   activeTab: string;
@@ -9,6 +9,7 @@ const tabs = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'jobs', label: 'Jobs', icon: ClipboardList },
   { id: 'fleet', label: 'Fleet & Drivers', icon: ShieldCheck },
+  { id: 'planner', label: 'Route Planner', icon: Brain },
 ];
 
 export default function NavBar({ activeTab, onTabChange }: NavBarProps) {

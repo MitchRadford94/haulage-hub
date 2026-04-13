@@ -57,6 +57,7 @@ export default function Index() {
         {activeTab === 'dashboard' && <DashboardView />}
         {activeTab === 'jobs' && <JobsView />}
         {activeTab === 'fleet' && <FleetPanel />}
+        {activeTab === 'planner' && <RoutePlanner />}
       </div>
     </TMSProvider>
   );

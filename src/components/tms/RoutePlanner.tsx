@@ -21,6 +21,7 @@ export default function RoutePlanner() {
   const [selectedDrivers, setSelectedDrivers] = useState<number[]>([]);
   const [assignments, setAssignments] = useState<Assignment[] | null>(null);
   const [loading, setLoading] = useState(false);
+  const [errors, setErrors] = useState<{ addresses?: string; drivers?: string }>({});
 
   const toggleDriver = (idx: number) => {
     setSelectedDrivers(prev =>
@@ -30,14 +31,21 @@ export default function RoutePlanner() {
 
   const handleOptimize = async () => {
     const lines = addresses.split('\n').map(l => l.trim()).filter(Boolean);
+    const newErrors: { addresses?: string; drivers?: string } = {};
+    console.log('[RoutePlanner] Optimize clicked — addresses:', lines.length, 'drivers:', selectedDrivers.length);
+
     if (lines.length < 2) {
-      toast.error('Enter at least 2 addresses');
-      return;
+      newErrors.addresses = 'Enter at least 2 addresses (one per line)';
     }
     if (selectedDrivers.length === 0) {
-      toast.error('Select at least 1 driver');
+      newErrors.drivers = 'Select at least 1 driver';
+    }
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      toast.error(Object.values(newErrors).join('. '));
       return;
     }
+    setErrors({});
 
     setLoading(true);
     setAssignments(null);

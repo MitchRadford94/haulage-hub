@@ -1,45 +1,25 @@
 
 
-## AI Route Planner
+## Problem
+The "Optimize Routes" button appears to do nothing because the request never reaches the server. The edge function works correctly (tested and confirmed). The issue is that **client-side validation fails silently** — the error toasts ("Enter at least 2 addresses" or "Select at least 1 driver") may not be visible or noticed.
 
-### What it does
-A new "Route Planner" tab where dispatchers enter a list of addresses/postcodes and select which drivers are available. AI optimizes and assigns stops across drivers, minimizing total distance. It then creates the jobs automatically.
+Additionally, there's no visual feedback on the form itself indicating what's missing.
 
-### How it works
+## Solution
+Add inline validation feedback so the user can clearly see what's needed before clicking Optimize.
 
-1. **New nav tab**: Add "Route Planner" with a brain/wand icon to the NavBar.
+### Changes: `src/components/tms/RoutePlanner.tsx`
 
-2. **New component `src/components/tms/RoutePlanner.tsx`**:
-   - Left side: text area to paste/type all delivery addresses (one per line), multi-select for available drivers + vehicles, date picker
-   - "Optimize Routes" button
-   - Right side: shows AI-generated assignments per driver with ordered stop lists
-   - "Create All Jobs" button to batch-create the jobs
+1. **Add inline error messages** below the addresses textarea and driver selection when validation fails — red text like "Enter at least 2 addresses" and "Select at least 1 driver" that appear after clicking Optimize with invalid input.
 
-3. **Edge function `supabase/functions/optimize-routes/index.ts`**:
-   - Receives: list of addresses, list of available drivers/vehicles, optional depot address
-   - Calls Lovable AI (Gemini) with a prompt like: "You are a logistics route optimizer. Given these delivery addresses and N available drivers starting from [depot], assign stops to drivers and order each driver's stops to minimize total driving distance. Return structured JSON."
-   - Uses tool-calling for structured output: `{ assignments: [{ driverIndex: number, stops: string[] }] }`
-   - Returns the optimized assignments
+2. **Add console.log in handleOptimize** for debugging — log the addresses count and selected drivers count so we can trace exactly what's happening if the issue persists.
 
-4. **Flow**:
-   - User pastes 20 addresses, selects 3 drivers + vehicles
-   - Clicks "Optimize" → calls edge function → AI returns grouped & ordered stops
-   - UI shows the plan per driver with a preview
-   - User clicks "Create Jobs" → creates one Job per driver with the AI-ordered stops
-   - Map auto-shows the routes
+3. **Disable the button with a tooltip** when prerequisites aren't met (no addresses or no drivers), making it clear the user needs to fill in the form first.
+
+4. **Ensure toast notifications are visible** — verify the Toaster component is rendered in the app and positioned correctly.
 
 ### Technical details
-
-- **Edge function** uses `LOVABLE_API_KEY` (already available) to call `https://ai.gateway.lovable.dev/v1/chat/completions`
-- Structured output via tool-calling ensures reliable JSON parsing
-- Model: `google/gemini-3-flash-preview` (fast, cheap)
-- Need to set up Lovable Cloud (supabase init) since no `supabase/` folder exists yet
-- Add the new tab to NavBar and Index.tsx
-- The RoutePlanner component uses the existing TMSContext to create jobs
-
-### Files to create/edit
-- `supabase/functions/optimize-routes/index.ts` — edge function
-- `src/components/tms/RoutePlanner.tsx` — new UI component
-- `src/components/tms/NavBar.tsx` — add tab
-- `src/pages/Index.tsx` — render RoutePlanner on new tab
-
+- Add `validationErrors` state to track which fields failed
+- Show red helper text under each field when validation fails
+- Keep the toast as a secondary notification
+- Add `console.log` breadcrumbs in `handleOptimize` for future debugging

@@ -21,6 +21,7 @@ export default function RoutePlanner() {
   const [selectedDrivers, setSelectedDrivers] = useState<number[]>([]);
   const [assignments, setAssignments] = useState<Assignment[] | null>(null);
   const [loading, setLoading] = useState(false);
+  const [errors, setErrors] = useState<{ addresses?: string; drivers?: string }>({});
 
   const toggleDriver = (idx: number) => {
     setSelectedDrivers(prev =>
@@ -30,14 +31,21 @@ export default function RoutePlanner() {
 
   const handleOptimize = async () => {
     const lines = addresses.split('\n').map(l => l.trim()).filter(Boolean);
+    const newErrors: { addresses?: string; drivers?: string } = {};
+    console.log('[RoutePlanner] Optimize clicked — addresses:', lines.length, 'drivers:', selectedDrivers.length);
+
     if (lines.length < 2) {
-      toast.error('Enter at least 2 addresses');
-      return;
+      newErrors.addresses = 'Enter at least 2 addresses (one per line)';
     }
     if (selectedDrivers.length === 0) {
-      toast.error('Select at least 1 driver');
+      newErrors.drivers = 'Select at least 1 driver';
+    }
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      toast.error(Object.values(newErrors).join('. '));
       return;
     }
+    setErrors({});
 
     setLoading(true);
     setAssignments(null);
@@ -115,8 +123,9 @@ export default function RoutePlanner() {
             value={addresses}
             onChange={e => setAddresses(e.target.value)}
             placeholder={"SW1A 1AA\nM1 1AA\nB1 1BB\n..."}
-            className="min-h-[160px] text-xs bg-secondary border-border font-mono"
+            className={`min-h-[160px] text-xs bg-secondary font-mono ${errors.addresses ? 'border-red-500' : 'border-border'}`}
           />
+          {errors.addresses && <p className="text-[10px] text-red-500 mt-1">{errors.addresses}</p>}
         </div>
 
         <div>
@@ -166,6 +175,7 @@ export default function RoutePlanner() {
               </button>
             ))}
           </div>
+          {errors.drivers && <p className="text-[10px] text-red-500 mt-1">{errors.drivers}</p>}
         </div>
 
         <Button

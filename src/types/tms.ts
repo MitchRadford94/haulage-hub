@@ -19,6 +19,9 @@ export interface Job {
   startTime?: string;
   completionTime?: string;
   createdAt: string;
+  depotAddress?: string;
+  depotLat?: number;
+  depotLng?: number;
 }
 
 export interface Driver {

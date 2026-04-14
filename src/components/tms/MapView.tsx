@@ -107,6 +107,23 @@ function createStopIcon(index: number, selected: boolean): L.DivIcon {
   });
 }
 
+function createDepotIcon(): L.DivIcon {
+  return L.divIcon({
+    className: '',
+    iconSize: [30, 30],
+    iconAnchor: [15, 15],
+    html: `<div style="
+      width:30px;height:30px;
+      background:#f59e0b;color:#fff;
+      border-radius:4px;border:2px solid #fff;
+      display:flex;align-items:center;justify-content:center;
+      font-size:14px;font-weight:700;
+      box-shadow:0 2px 6px rgba(0,0,0,0.4);
+      line-height:1;
+    ">D</div>`,
+  });
+}
+
 function decodePolyline6(encoded: string): [number, number][] {
   const coords: [number, number][] = [];
   let index = 0, lat = 0, lng = 0;

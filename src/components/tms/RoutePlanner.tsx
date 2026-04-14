@@ -62,7 +62,16 @@ export default function RoutePlanner() {
 
       if (error) throw error;
       if (data?.assignments) {
-        setAssignments(data.assignments);
+        // Filter out empty stops from assignments
+        const cleaned = data.assignments
+          .map((a: Assignment) => ({
+            ...a,
+            stops: a.stops.filter((s: string) => s && s.trim().length > 0),
+          }))
+          .filter((a: Assignment) => a.stops.length > 0);
+        setAssignments(cleaned);
+        // Store depot info from response for job creation
+        if (data.depot) setDepot(data.depot);
         toast.success('Routes optimized!');
       } else {
         throw new Error(data?.error || 'No assignments returned');
@@ -83,11 +92,15 @@ export default function RoutePlanner() {
       const vehicle = vehicles[driverIdx % vehicles.length];
       if (!driver || !vehicle) return;
 
-      const stops: Stop[] = a.stops.map((addr, i) => ({
-        id: crypto.randomUUID(),
-        address: addr,
-        completed: false,
-      }));
+      const stops: Stop[] = a.stops
+        .filter((addr: string) => addr && addr.trim().length > 0)
+        .map((addr: string) => ({
+          id: crypto.randomUUID(),
+          address: addr.trim(),
+          completed: false,
+        }));
+
+      if (stops.length === 0) return;
 
       const job: Job = {
         id: crypto.randomUUID(),
@@ -98,6 +111,7 @@ export default function RoutePlanner() {
         notes: 'AI-optimized route',
         status: 'not_started',
         createdAt: new Date().toISOString(),
+        depotAddress: depot || undefined,
       };
 
       addJob(job);

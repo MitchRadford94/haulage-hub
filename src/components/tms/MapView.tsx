@@ -25,6 +25,21 @@ function delay(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+async function geocodePostcode(postcode: string): Promise<[number, number] | null> {
+  try {
+    const res = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(postcode.trim())}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.status === 200 && data.result) {
+        return [data.result.latitude, data.result.longitude];
+      }
+    }
+  } catch {
+    // fall through
+  }
+  return null;
+}
+
 async function geocode(address: string): Promise<[number, number]> {
   const key = address.trim().toLowerCase();
 
@@ -38,15 +53,22 @@ async function geocode(address: string): Promise<[number, number]> {
     }
   }
 
-  // Call Nominatim with structured postcode search or free-text
-  try {
-    const trimmed = address.trim();
-    const isPostcode = UK_POSTCODE_RE.test(trimmed);
-    const url = isPostcode
-      ? `https://nominatim.openstreetmap.org/search?format=json&postalcode=${encodeURIComponent(trimmed)}&country=gb&limit=1`
-      : `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&countrycodes=gb&limit=1`;
+  // UK postcode → use postcodes.io (free, CORS-friendly, accurate)
+  const trimmed = address.trim();
+  if (UK_POSTCODE_RE.test(trimmed)) {
+    const coords = await geocodePostcode(trimmed);
+    if (coords) {
+      geocodeCache.set(key, coords);
+      return coords;
+    }
+  }
 
-    const res = await fetch(url, { headers: { 'User-Agent': 'LovableTMS/1.0' } });
+  // Non-postcode: try Nominatim free-text
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&countrycodes=gb&limit=1`,
+      { headers: { 'User-Agent': 'LovableTMS/1.0' } }
+    );
     if (res.ok) {
       const data = await res.json();
       if (data.length > 0) {
@@ -56,7 +78,7 @@ async function geocode(address: string): Promise<[number, number]> {
       }
     }
   } catch {
-    // fall through to hash fallback
+    // fall through
   }
 
   // Hash fallback

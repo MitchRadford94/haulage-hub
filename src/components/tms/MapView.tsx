@@ -277,7 +277,7 @@ export default function MapView() {
 
       if (cancelled) return;
 
-      // Active job: fetch real road route
+      // Active job: fetch real road route, including depot
       if (activeJob) {
         const stopCoords: [number, number][] = [];
         for (const s of activeJob.stops) {
@@ -285,8 +285,25 @@ export default function MapView() {
           stopCoords.push(await geocode(s.address));
           if (!wasCached) await delay(300);
         }
-        if (stopCoords.length > 1) {
-          const fallback = L.polyline(stopCoords, {
+
+        // Geocode depot if present
+        let depotCoord: [number, number] | null = null;
+        if (activeJob.depotAddress) {
+          const wasCached = geocodeCache.has(activeJob.depotAddress.trim().toLowerCase());
+          depotCoord = await geocode(activeJob.depotAddress);
+          if (!wasCached) await delay(300);
+
+          // Add depot marker
+          const depotMarker = L.marker(depotCoord, { icon: createDepotIcon() });
+          depotMarker.bindTooltip(`Depot: ${activeJob.depotAddress}`, { direction: 'top', offset: [0, -16] });
+          lg.addLayer(depotMarker);
+        }
+
+        // Build full route: depot -> stops
+        const fullRoute = depotCoord ? [depotCoord, ...stopCoords] : stopCoords;
+
+        if (fullRoute.length > 1) {
+          const fallback = L.polyline(fullRoute, {
             color: '#3b82f6',
             weight: 3,
             opacity: 0.6,
@@ -294,7 +311,7 @@ export default function MapView() {
           });
           lg.addLayer(fallback);
 
-          const roadCoords = await fetchRoute(stopCoords);
+          const roadCoords = await fetchRoute(fullRoute);
           if (!cancelled && roadCoords) {
             lg.removeLayer(fallback);
             lg.addLayer(
@@ -307,8 +324,9 @@ export default function MapView() {
           }
         }
 
-        if (stopCoords.length > 0) {
-          map.fitBounds(L.latLngBounds(stopCoords.map((c) => L.latLng(c[0], c[1]))), { padding: [50, 50], maxZoom: 10 });
+        const boundsCoords = depotCoord ? [depotCoord, ...stopCoords] : stopCoords;
+        if (boundsCoords.length > 0) {
+          map.fitBounds(L.latLngBounds(boundsCoords.map((c) => L.latLng(c[0], c[1]))), { padding: [50, 50], maxZoom: 10 });
         }
       } else if (allCoords.length > 0) {
         map.fitBounds(L.latLngBounds(allCoords.map((c) => L.latLng(c[0], c[1]))), { padding: [50, 50], maxZoom: 8 });

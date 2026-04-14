@@ -131,6 +131,15 @@ export default function JobList() {
                     </label>
                   ))}
                 </div>
+                {job.depotAddress && (
+                  <div className="mt-2">
+                    <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">Depot</div>
+                    <p className="text-xs text-secondary-foreground flex items-center gap-1">
+                      <MapPin className="h-2.5 w-2.5" />
+                      {job.depotAddress}
+                    </p>
+                  </div>
+                )}
                 {job.notes && (
                   <div className="mt-2">
                     <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">Notes</div>

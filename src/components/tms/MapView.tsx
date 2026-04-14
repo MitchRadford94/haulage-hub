@@ -19,11 +19,15 @@ const sampleCoords: Record<string, [number, number]> = {
 };
 
 const geocodeCache = new Map<string, [number, number]>();
+const UK_POSTCODE_RE = /^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$/i;
+
+function delay(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
 
 async function geocode(address: string): Promise<[number, number]> {
   const key = address.trim().toLowerCase();
 
-  // Check cache
   if (geocodeCache.has(key)) return geocodeCache.get(key)!;
 
   // Check local city lookup
@@ -34,12 +38,15 @@ async function geocode(address: string): Promise<[number, number]> {
     }
   }
 
-  // Call Nominatim
+  // Call Nominatim with structured postcode search or free-text
   try {
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&countrycodes=gb&limit=1`,
-      { headers: { 'User-Agent': 'LovableTMS/1.0' } }
-    );
+    const trimmed = address.trim();
+    const isPostcode = UK_POSTCODE_RE.test(trimmed);
+    const url = isPostcode
+      ? `https://nominatim.openstreetmap.org/search?format=json&postalcode=${encodeURIComponent(trimmed)}&country=gb&limit=1`
+      : `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&countrycodes=gb&limit=1`;
+
+    const res = await fetch(url, { headers: { 'User-Agent': 'LovableTMS/1.0' } });
     if (res.ok) {
       const data = await res.json();
       if (data.length > 0) {
@@ -197,7 +204,12 @@ export default function MapView() {
         const isActive = activeJob && job.id === activeJob.id;
         const stopCoords: [number, number][] = [];
 
-        const coords = await Promise.all(job.stops.map((s) => geocode(s.address)));
+        const coords: [number, number][] = [];
+        for (const s of job.stops) {
+          const wasCached = geocodeCache.has(s.address.trim().toLowerCase());
+          coords.push(await geocode(s.address));
+          if (!wasCached) await delay(300);
+        }
 
         coords.forEach((c, i) => {
           if (cancelled) return;
@@ -228,7 +240,12 @@ export default function MapView() {
 
       // Active job: fetch real road route
       if (activeJob) {
-        const stopCoords = await Promise.all(activeJob.stops.map((s) => geocode(s.address)));
+        const stopCoords: [number, number][] = [];
+        for (const s of activeJob.stops) {
+          const wasCached = geocodeCache.has(s.address.trim().toLowerCase());
+          stopCoords.push(await geocode(s.address));
+          if (!wasCached) await delay(300);
+        }
         if (stopCoords.length > 1) {
           const fallback = L.polyline(stopCoords, {
             color: '#3b82f6',

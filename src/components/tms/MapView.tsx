@@ -124,6 +124,12 @@ function createDepotIcon(): L.DivIcon {
   });
 }
 
+function createTextTooltip(text: string): HTMLSpanElement {
+  const el = document.createElement('span');
+  el.textContent = text;
+  return el;
+}
+
 function decodePolyline6(encoded: string): [number, number][] {
   const coords: [number, number][] = [];
   let index = 0, lat = 0, lng = 0;
@@ -256,7 +262,7 @@ export default function MapView() {
           stopCoords.push(c);
 
           const marker = L.marker(c, { icon: createStopIcon(i, !!isActive) });
-          marker.bindTooltip(`Stop ${i + 1}: ${job.stops[i].address}`, { direction: 'top', offset: [0, -14] });
+          marker.bindTooltip(createTextTooltip(`Stop ${i + 1}: ${job.stops[i].address}`), { direction: 'top', offset: [0, -14] });
           lg.addLayer(marker);
         });
 
@@ -295,7 +301,7 @@ export default function MapView() {
 
           // Add depot marker
           const depotMarker = L.marker(depotCoord, { icon: createDepotIcon() });
-          depotMarker.bindTooltip(`Depot: ${activeJob.depotAddress}`, { direction: 'top', offset: [0, -16] });
+          depotMarker.bindTooltip(createTextTooltip(`Depot: ${activeJob.depotAddress}`), { direction: 'top', offset: [0, -16] });
           lg.addLayer(depotMarker);
         }
 

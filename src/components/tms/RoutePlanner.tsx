@@ -13,6 +13,15 @@ interface Assignment {
   stops: string[];
 }
 
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'object' && error && 'message' in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === 'string') return message;
+  }
+  return 'Optimization failed';
+}
+
 export default function RoutePlanner() {
   const { drivers, vehicles, addJob } = useTMS();
   const [addresses, setAddresses] = useState('');
@@ -21,7 +30,7 @@ export default function RoutePlanner() {
   const [selectedDrivers, setSelectedDrivers] = useState<number[]>([]);
   const [assignments, setAssignments] = useState<Assignment[] | null>(null);
   const [loading, setLoading] = useState(false);
-  const [errors, setErrors] = useState<{ addresses?: string; drivers?: string }>({});
+  const [errors, setErrors] = useState<{ addresses?: string; drivers?: string; vehicles?: string }>({});
 
   const toggleDriver = (idx: number) => {
     setSelectedDrivers(prev =>
@@ -31,7 +40,7 @@ export default function RoutePlanner() {
 
   const handleOptimize = async () => {
     const lines = addresses.split('\n').map(l => l.trim()).filter(Boolean);
-    const newErrors: { addresses?: string; drivers?: string } = {};
+    const newErrors: { addresses?: string; drivers?: string; vehicles?: string } = {};
     console.log('[RoutePlanner] Optimize clicked — addresses:', lines.length, 'drivers:', selectedDrivers.length);
 
     if (lines.length < 2) {
@@ -39,6 +48,9 @@ export default function RoutePlanner() {
     }
     if (selectedDrivers.length === 0) {
       newErrors.drivers = 'Select at least 1 driver';
+    }
+    if (vehicles.length === 0) {
+      newErrors.vehicles = 'Add at least 1 vehicle before creating optimized jobs';
     }
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
@@ -76,8 +88,8 @@ export default function RoutePlanner() {
       } else {
         throw new Error(data?.error || 'No assignments returned');
       }
-    } catch (e: any) {
-      toast.error(e.message || 'Optimization failed');
+    } catch (e: unknown) {
+      toast.error(getErrorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -85,6 +97,13 @@ export default function RoutePlanner() {
 
   const handleCreateJobs = () => {
     if (!assignments) return;
+
+    if (vehicles.length === 0) {
+      toast.error('Add at least 1 vehicle before creating jobs');
+      return;
+    }
+
+    let createdCount = 0;
 
     assignments.forEach(a => {
       const driverIdx = selectedDrivers[a.driverIndex];
@@ -115,9 +134,15 @@ export default function RoutePlanner() {
       };
 
       addJob(job);
+      createdCount += 1;
     });
 
-    toast.success(`Created ${assignments.length} jobs`);
+    if (createdCount === 0) {
+      toast.error('No jobs were created. Check drivers, vehicles, and stops.');
+      return;
+    }
+
+    toast.success(`Created ${createdCount} ${createdCount === 1 ? 'job' : 'jobs'}`);
     setAssignments(null);
     setAddresses('');
   };
@@ -190,6 +215,7 @@ export default function RoutePlanner() {
             ))}
           </div>
           {errors.drivers && <p className="text-[10px] text-red-500 mt-1">{errors.drivers}</p>}
+          {errors.vehicles && <p className="text-[10px] text-red-500 mt-1">{errors.vehicles}</p>}
         </div>
 
         <Button

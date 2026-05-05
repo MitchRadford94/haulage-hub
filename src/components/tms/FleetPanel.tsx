@@ -25,6 +25,18 @@ export default function FleetPanel() {
     else toast.error('Vehicle already exists');
   };
 
+  const handleRemoveDriver = (id: string) => {
+    const ok = removeDriver(id);
+    if (ok) toast.success('Driver removed');
+    else toast.error('Driver is assigned to existing jobs');
+  };
+
+  const handleRemoveVehicle = (id: string) => {
+    const ok = removeVehicle(id);
+    if (ok) toast.success('Vehicle removed');
+    else toast.error('Vehicle is assigned to existing jobs');
+  };
+
   const inputClass = "bg-input border border-border rounded px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary flex-1";
 
   return (
@@ -44,7 +56,7 @@ export default function FleetPanel() {
           {drivers.map(d => (
             <div key={d.id} className="flex items-center justify-between bg-muted rounded px-3 py-1.5">
               <span className="text-xs">{d.name}</span>
-              <button onClick={() => { removeDriver(d.id); toast.success('Driver removed'); }} className="text-muted-foreground hover:text-destructive">
+              <button onClick={() => handleRemoveDriver(d.id)} className="text-muted-foreground hover:text-destructive">
                 <Trash2 className="h-3 w-3" />
               </button>
             </div>
@@ -68,7 +80,7 @@ export default function FleetPanel() {
           {vehicles.map(v => (
             <div key={v.id} className="flex items-center justify-between bg-muted rounded px-3 py-1.5">
               <span className="text-xs font-mono">{v.registration}</span>
-              <button onClick={() => { removeVehicle(v.id); toast.success('Vehicle removed'); }} className="text-muted-foreground hover:text-destructive">
+              <button onClick={() => handleRemoveVehicle(v.id)} className="text-muted-foreground hover:text-destructive">
                 <Trash2 className="h-3 w-3" />
               </button>
             </div>

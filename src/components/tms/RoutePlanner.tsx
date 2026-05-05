@@ -9,7 +9,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
 interface Assignment {
-  driverIndex: number;
+  driverId: string;
+  driverIndex?: number;
   stops: string[];
 }
 
@@ -27,26 +28,26 @@ export default function RoutePlanner() {
   const [addresses, setAddresses] = useState('');
   const [depot, setDepot] = useState('');
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
-  const [selectedDrivers, setSelectedDrivers] = useState<number[]>([]);
+  const [selectedDriverIds, setSelectedDriverIds] = useState<string[]>([]);
   const [assignments, setAssignments] = useState<Assignment[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<{ addresses?: string; drivers?: string; vehicles?: string }>({});
 
-  const toggleDriver = (idx: number) => {
-    setSelectedDrivers(prev =>
-      prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx]
+  const toggleDriver = (id: string) => {
+    setSelectedDriverIds(prev =>
+      prev.includes(id) ? prev.filter(driverId => driverId !== id) : [...prev, id]
     );
   };
 
   const handleOptimize = async () => {
     const lines = addresses.split('\n').map(l => l.trim()).filter(Boolean);
     const newErrors: { addresses?: string; drivers?: string; vehicles?: string } = {};
-    console.log('[RoutePlanner] Optimize clicked — addresses:', lines.length, 'drivers:', selectedDrivers.length);
+    console.log('[RoutePlanner] Optimize clicked - addresses:', lines.length, 'drivers:', selectedDriverIds.length);
 
     if (lines.length < 2) {
       newErrors.addresses = 'Enter at least 2 addresses (one per line)';
     }
-    if (selectedDrivers.length === 0) {
+    if (selectedDriverIds.length === 0) {
       newErrors.drivers = 'Select at least 1 driver';
     }
     if (vehicles.length === 0) {
@@ -63,10 +64,16 @@ export default function RoutePlanner() {
     setAssignments(null);
 
     try {
-      const driverList = selectedDrivers.map(i => ({
-        name: drivers[i].name,
-        vehicle: vehicles[i % vehicles.length]?.registration ?? 'Unassigned',
-      }));
+      const driverList = selectedDriverIds.flatMap(id => {
+        const driverIndex = drivers.findIndex(driver => driver.id === id);
+        const driver = drivers[driverIndex];
+        if (!driver) return [];
+        return [{
+          id: driver.id,
+          name: driver.name,
+          vehicle: vehicles[driverIndex % vehicles.length]?.registration ?? 'Unassigned',
+        }];
+      });
 
       const { data, error } = await supabase.functions.invoke('optimize-routes', {
         body: { addresses: lines, drivers: driverList, depot: depot || undefined },
@@ -78,9 +85,10 @@ export default function RoutePlanner() {
         const cleaned = data.assignments
           .map((a: Assignment) => ({
             ...a,
+            driverId: a.driverId ?? selectedDriverIds[a.driverIndex ?? -1],
             stops: a.stops.filter((s: string) => s && s.trim().length > 0),
           }))
-          .filter((a: Assignment) => a.stops.length > 0);
+          .filter((a: Assignment) => a.driverId && a.stops.length > 0);
         setAssignments(cleaned);
         // Store depot info from response for job creation
         if (data.depot) setDepot(data.depot);
@@ -106,8 +114,8 @@ export default function RoutePlanner() {
     let createdCount = 0;
 
     assignments.forEach(a => {
-      const driverIdx = selectedDrivers[a.driverIndex];
-      const driver = drivers[driverIdx];
+      const driver = drivers.find(d => d.id === a.driverId);
+      const driverIdx = drivers.findIndex(d => d.id === a.driverId);
       const vehicle = vehicles[driverIdx % vehicles.length];
       if (!driver || !vehicle) return;
 
@@ -196,9 +204,9 @@ export default function RoutePlanner() {
             {drivers.map((d, i) => (
               <button
                 key={d.id}
-                onClick={() => toggleDriver(i)}
+                onClick={() => toggleDriver(d.id)}
                 className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors ${
-                  selectedDrivers.includes(i)
+                  selectedDriverIds.includes(d.id)
                     ? 'bg-primary/15 text-primary border border-primary/30'
                     : 'bg-secondary text-muted-foreground border border-transparent hover:border-border'
                 }`}
@@ -264,14 +272,14 @@ export default function RoutePlanner() {
 
             <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
               {assignments.map((a, idx) => {
-                const driverIdx = selectedDrivers[a.driverIndex];
-                const driver = drivers[driverIdx];
+                const driver = drivers.find(d => d.id === a.driverId);
+                const driverIdx = drivers.findIndex(d => d.id === a.driverId);
                 const vehicle = vehicles[driverIdx % vehicles.length];
                 return (
                   <div key={idx} className="bg-card border border-border rounded-lg p-3">
                     <div className="flex items-center gap-2 mb-2 pb-2 border-b border-border">
                       <User className="h-3.5 w-3.5 text-primary" />
-                      <span className="text-xs font-medium text-foreground">{driver?.name ?? `Driver ${a.driverIndex}`}</span>
+                      <span className="text-xs font-medium text-foreground">{driver?.name ?? 'Driver unavailable'}</span>
                       {vehicle && (
                         <span className="ml-auto text-[10px] font-mono text-muted-foreground flex items-center gap-1">
                           <Truck className="h-2.5 w-2.5" />

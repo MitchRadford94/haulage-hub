@@ -13,9 +13,9 @@ interface TMSContextType {
   updateJob: (job: Job) => void;
   removeJob: (id: string) => void;
   addDriver: (driver: Driver) => boolean;
-  removeDriver: (id: string) => void;
+  removeDriver: (id: string) => boolean;
   addVehicle: (vehicle: Vehicle) => boolean;
-  removeVehicle: (id: string) => void;
+  removeVehicle: (id: string) => boolean;
 }
 
 const TMSContext = createContext<TMSContextType | null>(null);
@@ -55,8 +55,9 @@ export function TMSProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const removeDriver = useCallback((id: string) => {
-    store.deleteDriver(id);
-    setDrivers(store.getDrivers());
+    const ok = store.deleteDriver(id);
+    if (ok) setDrivers(store.getDrivers());
+    return ok;
   }, []);
 
   const addVehicleFn = useCallback((vehicle: Vehicle) => {
@@ -66,8 +67,9 @@ export function TMSProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const removeVehicle = useCallback((id: string) => {
-    store.deleteVehicle(id);
-    setVehicles(store.getVehicles());
+    const ok = store.deleteVehicle(id);
+    if (ok) setVehicles(store.getVehicles());
+    return ok;
   }, []);
 
   return (

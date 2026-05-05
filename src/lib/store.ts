@@ -43,8 +43,10 @@ export function addDriver(driver: Driver): boolean {
   save(DRIVERS_KEY, drivers);
   return true;
 }
-export function deleteDriver(id: string) {
+export function deleteDriver(id: string): boolean {
+  if (getJobs().some(j => j.driverId === id)) return false;
   save(DRIVERS_KEY, getDrivers().filter(d => d.id !== id));
+  return true;
 }
 
 // Vehicles
@@ -58,6 +60,8 @@ export function addVehicle(vehicle: Vehicle): boolean {
   save(VEHICLES_KEY, vehicles);
   return true;
 }
-export function deleteVehicle(id: string) {
+export function deleteVehicle(id: string): boolean {
+  if (getJobs().some(j => j.vehicleId === id)) return false;
   save(VEHICLES_KEY, getVehicles().filter(v => v.id !== id));
+  return true;
 }

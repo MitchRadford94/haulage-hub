@@ -24,6 +24,29 @@ async function geocodePostcode(pc: string): Promise<Coord | null> {
   return null;
 }
 
+async function geocodeAddress(address: string): Promise<Coord | null> {
+  if (UK_POSTCODE_RE.test(address)) {
+    const postcodeCoord = await geocodePostcode(address);
+    if (postcodeCoord) return postcodeCoord;
+  }
+
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&countrycodes=gb&limit=1`,
+      { headers: { "User-Agent": "HaulageHub/1.0" } },
+    );
+    if (res.ok) {
+      const data = await res.json();
+      const first = data?.[0];
+      if (first?.lat && first?.lon) {
+        return { lat: Number(first.lat), lng: Number(first.lon) };
+      }
+    }
+  } catch { /* ignore */ }
+
+  return null;
+}
+
 async function geocodeBulkPostcodes(postcodes: string[]): Promise<Map<string, Coord>> {
   const result = new Map<string, Coord>();
   // postcodes.io bulk endpoint, max 100 per request
@@ -78,11 +101,17 @@ function orderByNearest(start: Coord, stops: { address: string; coord: Coord }[]
   return ordered;
 }
 
+interface RouteDriver {
+  id?: string;
+  name?: string;
+  vehicle?: string;
+}
+
 // Assign stops to drivers by geographic clustering (k-means-like with nearest assignment)
 function assignToDrivers(
   stops: { address: string; coord: Coord }[],
   driverCount: number,
-  depotCoord: Coord | null
+  depotCoord: Coord | null,
 ): { address: string; coord: Coord }[][] {
   if (driverCount <= 1) return [stops];
 
@@ -113,7 +142,8 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { addresses: rawAddresses, drivers, depot } = await req.json();
+    const { addresses: rawAddresses, drivers: rawDrivers, depot } = await req.json();
+    const drivers: RouteDriver[] = Array.isArray(rawDrivers) ? rawDrivers : [];
 
     // Sanitize: trim and remove blank addresses
     const addresses: string[] = (rawAddresses ?? [])
@@ -136,14 +166,12 @@ serve(async (req) => {
     const postcodes = allToGeocode.filter(a => UK_POSTCODE_RE.test(a));
     const coordMap = await geocodeBulkPostcodes(postcodes);
 
-    // For non-postcodes, try individual geocoding
+    // For anything not covered by the postcode bulk endpoint, try individual geocoding.
     for (const addr of allToGeocode) {
       const key = addr.trim().toUpperCase().replace(/\s+/g, " ");
       if (!coordMap.has(key)) {
-        if (UK_POSTCODE_RE.test(addr)) {
-          const c = await geocodePostcode(addr);
-          if (c) coordMap.set(key, c);
-        }
+        const c = await geocodeAddress(addr);
+        if (c) coordMap.set(key, c);
       }
     }
 
@@ -200,6 +228,7 @@ serve(async (req) => {
 
     const assignments = groups.map((group, idx) => ({
       driverIndex: idx,
+      driverId: drivers[idx]?.id ?? null,
       stops: orderByNearest(startPoint, group).map(s => s.address),
     })).filter(a => a.stops.length > 0);
 

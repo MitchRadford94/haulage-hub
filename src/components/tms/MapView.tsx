@@ -149,6 +149,15 @@ function decodePolyline6(encoded: string): [number, number][] {
   return coords;
 }
 
+function isValidCoord(coord: [number, number]): boolean {
+  const [lat, lng] = coord;
+  return Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+}
+
+function coordsMatch(a: [number, number], b: [number, number]): boolean {
+  return Math.abs(a[0] - b[0]) < 0.000001 && Math.abs(a[1] - b[1]) < 0.000001;
+}
+
 async function fetchRoute(stops: [number, number][]): Promise<[number, number][] | null> {
   if (stops.length < 2) return null;
 
@@ -170,8 +179,27 @@ async function fetchRoute(stops: [number, number][]): Promise<[number, number][]
     });
     if (res.ok) {
       const data = await res.json();
-      const shape = data.trip?.legs?.map((l: { shape: string }) => l.shape).join('') ?? data.trip?.shape;
-      if (shape) return decodePolyline6(shape);
+      const legShapes = data.trip?.legs
+        ?.map((leg: { shape?: string }) => leg.shape)
+        .filter((shape: unknown): shape is string => typeof shape === 'string' && shape.length > 0);
+
+      if (legShapes?.length) {
+        let previousEnd: [number, number] | null = null;
+        const route = legShapes.flatMap((shape: string) => {
+          const coords = decodePolyline6(shape).filter(isValidCoord);
+          if (coords.length === 0) return [];
+
+          const shouldSkipFirst = previousEnd ? coordsMatch(previousEnd, coords[0]) : false;
+          previousEnd = coords[coords.length - 1];
+          return shouldSkipFirst ? coords.slice(1) : coords;
+        });
+        if (route.length > 1) return route;
+      }
+
+      if (data.trip?.shape) {
+        const route = decodePolyline6(data.trip.shape).filter(isValidCoord);
+        if (route.length > 1) return route;
+      }
     }
   } catch {
     // fall through to OSRM
@@ -185,7 +213,10 @@ async function fetchRoute(stops: [number, number][]): Promise<[number, number][]
     );
     const data = await res.json();
     if (data.code === 'Ok' && data.routes?.[0]?.geometry?.coordinates) {
-      return data.routes[0].geometry.coordinates.map(([lng, lat]: [number, number]) => [lat, lng]);
+      const route = data.routes[0].geometry.coordinates
+        .map(([lng, lat]: [number, number]) => [lat, lng] as [number, number])
+        .filter(isValidCoord);
+      if (route.length > 1) return route;
     }
   } catch {
     // fall back to straight line

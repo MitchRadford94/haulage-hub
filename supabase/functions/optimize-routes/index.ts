@@ -82,58 +82,166 @@ function dist(a: Coord, b: Coord): number {
   return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
 }
 
-// Nearest-neighbour ordering from a start point
-function orderByNearest(start: Coord, stops: { address: string; coord: Coord }[]): { address: string; coord: Coord }[] {
-  const remaining = [...stops];
-  const ordered: typeof stops = [];
-  let current = start;
-  while (remaining.length > 0) {
-    let bestIdx = 0;
-    let bestDist = Infinity;
-    for (let i = 0; i < remaining.length; i++) {
-      const d = dist(current, remaining[i].coord);
-      if (d < bestDist) { bestDist = d; bestIdx = i; }
-    }
-    ordered.push(remaining[bestIdx]);
-    current = remaining[bestIdx].coord;
-    remaining.splice(bestIdx, 1);
-  }
-  return ordered;
-}
-
 interface RouteDriver {
   id?: string;
   name?: string;
   vehicle?: string;
 }
 
-// Assign stops to drivers by geographic clustering (k-means-like with nearest assignment)
-function assignToDrivers(
-  stops: { address: string; coord: Coord }[],
+interface StopWithCoord {
+  address: string;
+  coord: Coord;
+}
+
+interface RouteGroup {
+  stopIndexes: number[];
+  orderedIndexes: number[];
+  duration: number;
+}
+
+function fallbackTruckMatrix(points: Coord[]): number[][] {
+  // Conservative HGV average including urban delivery work, in seconds.
+  const secondsPerKm = 75;
+  return points.map(from => points.map(to => dist(from, to) * secondsPerKm));
+}
+
+async function fetchTruckMatrix(points: Coord[]): Promise<{ matrix: number[][]; source: "valhalla" | "fallback" }> {
+  const fallback = fallbackTruckMatrix(points);
+
+  try {
+    const locations = points.map(({ lat, lng }) => ({ lat, lon: lng }));
+    const res = await fetch("https://valhalla1.openstreetmap.de/sources_to_targets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sources: locations,
+        targets: locations,
+        costing: "truck",
+        costing_options: {
+          truck: { height: 4.11, width: 2.6, weight: 44, length: 16.5 },
+        },
+        units: "km",
+      }),
+    });
+
+    if (!res.ok) return { matrix: fallback, source: "fallback" };
+
+    const data = await res.json();
+    const rows = data.sources_to_targets;
+    if (!Array.isArray(rows) || rows.length !== points.length) return { matrix: fallback, source: "fallback" };
+
+    const matrix = rows.map((row: Array<{ time?: number }>, fromIdx: number) =>
+      row.map((cell, toIdx) => {
+        const time = cell?.time;
+        return Number.isFinite(time) && time >= 0 ? time : fallback[fromIdx][toIdx];
+      })
+    );
+
+    return { matrix, source: "valhalla" };
+  } catch {
+    return { matrix: fallback, source: "fallback" };
+  }
+}
+
+function routeDuration(startIndex: number, orderedStopIndexes: number[], matrix: number[][]): number {
+  let duration = 0;
+  let current = startIndex;
+  for (const stopIndex of orderedStopIndexes) {
+    duration += matrix[current][stopIndex];
+    current = stopIndex;
+  }
+  return duration;
+}
+
+function nearestByTime(startIndex: number, stopIndexes: number[], matrix: number[][]): number[] {
+  const remaining = [...stopIndexes];
+  const ordered: number[] = [];
+  let current = startIndex;
+
+  while (remaining.length > 0) {
+    let bestIdx = 0;
+    let bestTime = Infinity;
+    for (let i = 0; i < remaining.length; i++) {
+      const time = matrix[current][remaining[i]];
+      if (time < bestTime) {
+        bestTime = time;
+        bestIdx = i;
+      }
+    }
+    const [next] = remaining.splice(bestIdx, 1);
+    ordered.push(next);
+    current = next;
+  }
+
+  return ordered;
+}
+
+function twoOptOpenRoute(startIndex: number, orderedStopIndexes: number[], matrix: number[][]): number[] {
+  let route = [...orderedStopIndexes];
+  let improved = true;
+
+  while (improved) {
+    improved = false;
+    for (let i = 0; i < route.length - 1; i++) {
+      for (let k = i + 1; k < route.length; k++) {
+        const candidate = [
+          ...route.slice(0, i),
+          ...route.slice(i, k + 1).reverse(),
+          ...route.slice(k + 1),
+        ];
+        if (routeDuration(startIndex, candidate, matrix) + 1 < routeDuration(startIndex, route, matrix)) {
+          route = candidate;
+          improved = true;
+        }
+      }
+    }
+  }
+
+  return route;
+}
+
+function optimizeStopOrder(startIndex: number, stopIndexes: number[], matrix: number[][]): number[] {
+  return twoOptOpenRoute(startIndex, nearestByTime(startIndex, stopIndexes, matrix), matrix);
+}
+
+function assignToDriversByTime(
+  stopIndexes: number[],
   driverCount: number,
-  depotCoord: Coord | null,
-): { address: string; coord: Coord }[][] {
-  if (driverCount <= 1) return [stops];
-
-  // Sort all stops by angle from centroid for initial partitioning
-  const centroid: Coord = {
-    lat: stops.reduce((s, x) => s + x.coord.lat, 0) / stops.length,
-    lng: stops.reduce((s, x) => s + x.coord.lng, 0) / stops.length,
-  };
-
-  const withAngle = stops.map(s => ({
-    ...s,
-    angle: Math.atan2(s.coord.lat - centroid.lat, s.coord.lng - centroid.lng),
+  matrix: number[][],
+): RouteGroup[] {
+  const startIndex = 0;
+  const targetStopsPerDriver = Math.ceil(stopIndexes.length / driverCount);
+  const groups: RouteGroup[] = Array.from({ length: driverCount }, () => ({
+    stopIndexes: [],
+    orderedIndexes: [],
+    duration: 0,
   }));
-  withAngle.sort((a, b) => a.angle - b.angle);
 
-  // Split roughly evenly by angle
-  const groups: { address: string; coord: Coord }[][] = Array.from({ length: driverCount }, () => []);
-  const perDriver = Math.ceil(withAngle.length / driverCount);
-  withAngle.forEach((s, i) => {
-    const gi = Math.min(Math.floor(i / perDriver), driverCount - 1);
-    groups[gi].push(s);
-  });
+  const hardestStopsFirst = [...stopIndexes].sort((a, b) => matrix[startIndex][b] - matrix[startIndex][a]);
+
+  for (const stopIndex of hardestStopsFirst) {
+    let bestGroupIndex = 0;
+    let bestScore = Infinity;
+
+    for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
+      const candidateStops = [...groups[groupIndex].stopIndexes, stopIndex];
+      const candidateOrder = optimizeStopOrder(startIndex, candidateStops, matrix);
+      const candidateDuration = routeDuration(startIndex, candidateOrder, matrix);
+      const overloadPenalty = Math.max(0, candidateStops.length - targetStopsPerDriver) * 15 * 60;
+      const idleBalancePenalty = groups[groupIndex].stopIndexes.length * 2 * 60;
+      const score = candidateDuration + overloadPenalty + idleBalancePenalty;
+
+      if (score < bestScore) {
+        bestScore = score;
+        bestGroupIndex = groupIndex;
+      }
+    }
+
+    const group = groups[bestGroupIndex];
+    group.stopIndexes.push(stopIndex);
+    group.orderedIndexes = optimizeStopOrder(startIndex, group.stopIndexes, matrix);
+    group.duration = routeDuration(startIndex, group.orderedIndexes, matrix);
+  }
 
   return groups;
 }
@@ -176,7 +284,7 @@ serve(async (req) => {
     }
 
     // Build stop objects with coordinates
-    const stops: { address: string; coord: Coord }[] = [];
+    const stops: StopWithCoord[] = [];
     const failedAddresses: string[] = [];
 
     for (const addr of addresses) {
@@ -217,25 +325,34 @@ serve(async (req) => {
       console.log(`[optimize-routes] depot coord:`, depotCoord);
     }
 
-    // Assign stops to drivers by geographic clustering
-    const groups = assignToDrivers(stops, drivers.length, depotCoord);
-
-    // Order each group by nearest-neighbour from depot (or centroid)
     const startPoint = depotCoord ?? {
       lat: stops.reduce((s, x) => s + x.coord.lat, 0) / stops.length,
       lng: stops.reduce((s, x) => s + x.coord.lng, 0) / stops.length,
     };
 
+    const matrixPoints = [startPoint, ...stops.map(stop => stop.coord)];
+    const { matrix, source: matrixSource } = await fetchTruckMatrix(matrixPoints);
+    const stopIndexes = stops.map((_, idx) => idx + 1);
+    const groups = assignToDriversByTime(stopIndexes, drivers.length, matrix);
+
     const assignments = groups.map((group, idx) => ({
       driverIndex: idx,
       driverId: drivers[idx]?.id ?? null,
-      stops: orderByNearest(startPoint, group).map(s => s.address),
+      estimatedMinutes: Math.round(group.duration / 60),
+      stops: group.orderedIndexes.map(stopIndex => stops[stopIndex - 1].address),
     })).filter(a => a.stops.length > 0);
 
-    console.log(`[optimize-routes] assignments:`, assignments.map(a => `driver ${a.driverIndex}: ${a.stops.length} stops`));
+    console.log(
+      `[optimize-routes] ${matrixSource} assignments:`,
+      assignments.map(a => `driver ${a.driverIndex}: ${a.stops.length} stops, ${a.estimatedMinutes} mins`),
+    );
 
     return new Response(JSON.stringify({
       assignments,
+      optimization: {
+        mode: "hgv_quickest",
+        matrixSource,
+      },
       depot: depot?.trim() || null,
       depotCoord,
     }), {

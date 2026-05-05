@@ -1,8 +1,10 @@
-import { Job, Driver, Vehicle } from '@/types/tms';
+import { Job, Driver, Vehicle, VehicleCheck, VehicleCheckFilters } from '@/types/tms';
+import { filterVehicleChecks } from '@/lib/vehicleChecks';
 
 const JOBS_KEY = 'tms_jobs';
 const DRIVERS_KEY = 'tms_drivers';
 const VEHICLES_KEY = 'tms_vehicles';
+const VEHICLE_CHECKS_KEY = 'tms_vehicle_checks';
 
 function load<T>(key: string): T[] {
   try {
@@ -64,4 +66,23 @@ export function deleteVehicle(id: string): boolean {
   if (getJobs().some(j => j.vehicleId === id)) return false;
   save(VEHICLES_KEY, getVehicles().filter(v => v.id !== id));
   return true;
+}
+
+// Vehicle Checks
+export function getVehicleChecks(filters?: VehicleCheckFilters): VehicleCheck[] {
+  const checks = load<VehicleCheck>(VEHICLE_CHECKS_KEY)
+    .sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+  return filters ? filterVehicleChecks(checks, filters) : checks;
+}
+
+export function getVehicleCheck(id: string): VehicleCheck | null {
+  return getVehicleChecks().find(check => check.id === id) ?? null;
+}
+
+export function saveVehicleCheck(check: VehicleCheck) {
+  const checks = getVehicleChecks();
+  const idx = checks.findIndex(c => c.id === check.id);
+  if (idx >= 0) checks[idx] = check;
+  else checks.push(check);
+  save(VEHICLE_CHECKS_KEY, checks);
 }

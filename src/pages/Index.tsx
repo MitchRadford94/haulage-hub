@@ -7,6 +7,8 @@ import JobList from '@/components/tms/JobList';
 import MapView from '@/components/tms/MapView';
 import FleetPanel from '@/components/tms/FleetPanel';
 import RoutePlanner from '@/components/tms/RoutePlanner';
+import DriverVehicleCheck from '@/components/tms/DriverVehicleCheck';
+import VehicleChecksOffice from '@/components/tms/VehicleChecksOffice';
 
 function DashboardView() {
   return (
@@ -58,6 +60,8 @@ export default function Index() {
         {activeTab === 'jobs' && <JobsView />}
         {activeTab === 'fleet' && <FleetPanel />}
         {activeTab === 'planner' && <RoutePlanner />}
+        {activeTab === 'driver-check' && <DriverVehicleCheck />}
+        {activeTab === 'vehicle-checks' && <VehicleChecksOffice />}
       </div>
     </TMSProvider>
   );

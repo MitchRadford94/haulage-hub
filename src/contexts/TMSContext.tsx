@@ -1,11 +1,12 @@
 import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
-import { Job, Driver, Vehicle } from '@/types/tms';
+import { Job, Driver, Vehicle, VehicleCheck } from '@/types/tms';
 import * as store from '@/lib/store';
 
 interface TMSContextType {
   jobs: Job[];
   drivers: Driver[];
   vehicles: Vehicle[];
+  vehicleChecks: VehicleCheck[];
   selectedJobId: string | null;
   setSelectedJobId: (id: string | null) => void;
   refreshData: () => void;
@@ -16,6 +17,7 @@ interface TMSContextType {
   removeDriver: (id: string) => boolean;
   addVehicle: (vehicle: Vehicle) => boolean;
   removeVehicle: (id: string) => boolean;
+  addVehicleCheck: (check: VehicleCheck) => void;
 }
 
 const TMSContext = createContext<TMSContextType | null>(null);
@@ -24,12 +26,14 @@ export function TMSProvider({ children }: { children: ReactNode }) {
   const [jobs, setJobs] = useState<Job[]>(store.getJobs);
   const [drivers, setDrivers] = useState<Driver[]>(store.getDrivers);
   const [vehicles, setVehicles] = useState<Vehicle[]>(store.getVehicles);
+  const [vehicleChecks, setVehicleChecks] = useState<VehicleCheck[]>(store.getVehicleChecks);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
 
   const refreshData = useCallback(() => {
     setJobs(store.getJobs());
     setDrivers(store.getDrivers());
     setVehicles(store.getVehicles());
+    setVehicleChecks(store.getVehicleChecks());
   }, []);
 
   const addJob = useCallback((job: Job) => {
@@ -72,12 +76,18 @@ export function TMSProvider({ children }: { children: ReactNode }) {
     return ok;
   }, []);
 
+  const addVehicleCheck = useCallback((check: VehicleCheck) => {
+    store.saveVehicleCheck(check);
+    setVehicleChecks(store.getVehicleChecks());
+  }, []);
+
   return (
     <TMSContext.Provider value={{
-      jobs, drivers, vehicles, selectedJobId, setSelectedJobId,
+      jobs, drivers, vehicles, vehicleChecks, selectedJobId, setSelectedJobId,
       refreshData, addJob, updateJob, removeJob,
       addDriver: addDriverFn, removeDriver,
       addVehicle: addVehicleFn, removeVehicle,
+      addVehicleCheck,
     }}>
       {children}
     </TMSContext.Provider>

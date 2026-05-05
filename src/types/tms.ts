@@ -33,3 +33,31 @@ export interface Vehicle {
   id: string;
   registration: string;
 }
+
+export type VehicleCheckStatus = 'OK' | 'DEFECT';
+
+export interface VehicleCheckResult {
+  item: string;
+  status: VehicleCheckStatus;
+  note: string;
+  photoRequired: boolean;
+  photo: string | null;
+}
+
+export interface VehicleCheck {
+  id: string;
+  driver: string;
+  vehicle: string;
+  startedAt: string;
+  submittedAt: string;
+  requiredPhotoChecks: string[];
+  results: VehicleCheckResult[];
+  notes: string;
+}
+
+export interface VehicleCheckFilters {
+  driver?: string;
+  vehicle?: string;
+  date?: string;
+  defectsOnly?: boolean;
+}
